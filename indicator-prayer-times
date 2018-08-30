@@ -1,0 +1,404 @@
+#!/usr/bin/env python2
+# -*- coding: utf-8 -*-
+# TODO: Help document
+# TODO: Good Code Documentation
+from gi.repository import Gtk, GObject, Gio, GLib, GdkPixbuf  # "The New One :D"
+from gi.repository import AppIndicator3 as AI
+from prayertime import *
+from HijriCal import HijriCal
+from configer import *
+import os
+import sys
+import ConfigParser
+import string
+#import appindicator "VERY old!"
+#import pynotify
+import datetime
+import locale
+from gi.repository import Notify
+locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
+
+class IndicatorPrayerTimes:
+    def __init__(self):
+        # Setup Indicator Applet
+        self.Indicator = AI.Indicator.new("indicator-prayer-times","indicator-prayer-times", 
+			AI.IndicatorCategory.APPLICATION_STATUS)
+        self.Indicator.set_status(AI.IndicatorStatus.ACTIVE)
+        self.Indicator.set_icon(self.Icon())
+        # Activate the Settings Window
+        self.configer = Configer()
+
+        PT = Prayertime(self.GetSettings(2),self.GetSettings(1), self.GetSettings(3), datetime.datetime.now().year, datetime.datetime.now().month, datetime.datetime.now().day, self.GetSettings(4), self.GetSettings(5), Season.Winter)
+        PT.calculate()
+        print "DEBUG: indicator-prayer-times started! @%s" % (str(datetime.datetime.now()))
+        print "DEBUG: started prayer times report: @%s" % (str(datetime.datetime.now()))
+        PT.report()
+        print "DEBUG: end of report @%s" % (str(datetime.datetime.now()))
+
+        # Setup the Menu 
+        print "DEBUG: initialize the menu @%s" % (str(datetime.datetime.now()))
+        self.Menu = Gtk.Menu()
+        
+        print "DEBUG: filling menu with hijri dates @%s" % (str(datetime.datetime.now()))
+        self.Hijri()# this Fills the Menu with Hijri Date
+        self.Menu.append(Gtk.SeparatorMenuItem())
+        
+        print "DEBUG: filling menu with prayertimes @%s" % (str(datetime.datetime.now()))
+        self.Times()# this Fills the Menu with Prayer Times
+        self.Menu.append(Gtk.SeparatorMenuItem())
+        
+        print "DEBUG: appending menu items @%s" % (str(datetime.datetime.now()))
+        self.NextPrayerItem = Gtk.MenuItem('Next Prayer', sensitive=False)# Next PrayerTime's Item, it shows you information about the next prayer
+        self.Menu.append(self.NextPrayerItem)
+        self.Menu.append(Gtk.SeparatorMenuItem())
+
+        
+        AboutItem = Gtk.MenuItem('About')# About :)
+        self.Menu.append(AboutItem)
+        AboutItem.connect('activate',self.AboutDialog, None)
+
+        SettingsItem = Gtk.MenuItem('Settings')# Settings Button
+        self.Menu.append(SettingsItem)
+        SettingsItem.connect('activate', self.ShowSettings, None)
+
+        ExitItem = Gtk.MenuItem('Quit')
+        self.Menu.append(ExitItem)
+        ExitItem.connect('activate',Gtk.main_quit, None)
+
+        print "DEBUG: starting mainloop @%s" % (str(datetime.datetime.now()))
+        self.Loop()# Run Application's Loop
+        self.Menu.show_all()# Show All Items
+        self.Indicator.set_menu(self.Menu)# Assign Menu To Indicator
+        self.GobjectLoop = GObject.timeout_add_seconds(1,self.Loop)# Run Loop
+
+    def Loop(self):
+        global NextPrayerDT
+        PT = Prayertime(self.GetSettings(2),self.GetSettings(1), self.GetSettings(3), datetime.datetime.now().year, datetime.datetime.now().month, datetime.datetime.now().day, self.GetSettings(4), self.GetSettings(5), Season.Winter)# Setup Prayer Times Moudle
+        PT.calculate()# Calculate PrayerTimes
+        Fajr    = datetime.datetime.strptime(PT.fajr_time(),"%I:%M:%S %p")# Transform Times To DateTimes ,so We Can Make Calculations on it
+        Dhuhr   = datetime.datetime.strptime(PT.zuhr_time(),"%I:%M:%S %p")
+        Asr     = datetime.datetime.strptime(PT.asr_time(),"%I:%M:%S %p")
+        Maghrib = datetime.datetime.strptime(PT.maghrib_time(),"%I:%M:%S %p")
+        Isha    = datetime.datetime.strptime(PT.isha_time(),"%I:%M:%S %p")
+        PrayerTimes = [Fajr,Dhuhr,Asr,Maghrib,Isha]# Assign Times to A List
+        Time=datetime.datetime.now()# Time Now
+        Time=Time.replace(microsecond=0, year=1900, month=1, day=1)# Replace year,month and day to be the same on PrayerTimes
+        NotifTime=Time+datetime.timedelta(minutes=self.GetSettings(7))# Ten Minutes Before Next Prayer
+        ClosestPrayer=self.closest(Time, PrayerTimes)# Get The Closest Prayer Time
+        PrayerIndex=PrayerTimes.index(ClosestPrayer)# Get Index From List
+        if PrayerIndex==0 and Time<Fajr:
+                        PrevPrayer='Isha'
+			NextPrayer='Fajr'
+                        NextPrayerDT=Fajr
+        if PrayerIndex==0 and Time>Fajr:
+                        PrevPrayer='Fajr'
+			NextPrayer='Dhuhr'
+                        NextPrayerDT=Dhuhr
+        if PrayerIndex==0:
+                        CurrentPrayer='Fajr'
+	if PrayerIndex==1 and Time<Dhuhr:
+                        PrevPrayer='Fajr'
+			NextPrayer='Dhuhr'
+                        NextPrayerDT=Dhuhr
+	if PrayerIndex==1 and Time>Dhuhr:
+                        PrevPrayer='Dhuhr'
+			NextPrayer='Asr'
+                        NextPrayerDT=Asr
+        if PrayerIndex==1:
+                        CurrentPrayer='Dhuhr'
+	if PrayerIndex==2 and Time<Asr:
+                        PrevPrayer='Dhuhr'
+			NextPrayer='Asr'
+                        NextPrayerDT=Asr
+	if PrayerIndex==2 and Time>Asr:
+                        PrevPrayer='Asr'
+			NextPrayer='Maghrib'
+                        NextPrayerDT=Maghrib
+        if PrayerIndex==2:
+                        CurrentPrayer='Asr'
+	if PrayerIndex==3 and Time<Maghrib:
+                        PrevPrayer='Asr'
+			NextPrayer='Maghrib'
+                        NextPrayerDT=Maghrib
+	if PrayerIndex==3 and Time>Maghrib:
+                        PrevPrayer='Maghrib'
+			NextPrayer='Isha'
+                        NextPrayerDT=Isha
+        if PrayerIndex==3:
+                        CurrentPrayer='Maghrib'
+	if PrayerIndex==4 and Time<Isha:
+                        PrevPrayer='Maghrib'
+			NextPrayer='Isha'
+                        NextPrayerDT=Isha
+	if PrayerIndex==4 and Time>Isha:# Calculate Next Day Fajr
+                        PrevPrayer='Isha'
+			NextPrayer='Fajr'
+                        NextPrayerDT=Fajr
+        if PrayerIndex==4:
+                        CurrentPrayer='Isha'
+	TimeToNextPrayer=NextPrayerDT-Time# Calculate Time to The Next Prayer
+        if TimeToNextPrayer.total_seconds() > 0:
+                        self.NextPrayerItem.set_label("%s until %s" % (self.secs_to_hrtime(TimeToNextPrayer.seconds), NextPrayer))
+                        if self.GetSettings(8) == '1':
+                               self.Indicator.set_label(("%s-%s" % (NextPrayer, (self.secs_to_nrtime(TimeToNextPrayer.seconds)))),"")
+        if TimeToNextPrayer.total_seconds() < 0:
+                        self.NextPrayerItem.set_label("Previous Prayer was %s" % (PrevPrayer))
+
+        for time in PrayerTimes:
+                        if time == NotifTime:# Notification
+                                Notify.init("Indicator Prayer Times")
+		               	Notif = Notify.Notification.new('Get Ready','%s minutes left until the %s prayer.' %(str(self.GetSettings(7)),NextPrayer), self.Icon())
+                                Notif.show()
+                        if time == Time:
+                                Notify.init("Indicator Prayer Times")
+		        	Notif=Notify.Notification.new('Prayer time for %s' % CurrentPrayer,"It's time for the %s prayer." %(CurrentPrayer), self.Icon())
+                                Notif.show()
+        return True
+
+    def closest(self, target, collection) :# Returns the closest Azan
+		return min((abs(target - i), i) for i in collection)[1]
+
+    def secs_to_hrtime(self, secs):
+		# Transform Seconds into Hours and Minutes
+		return str(secs//3600)+" Hours and "+str(((secs//60)%60))+" Minutes"
+
+    def secs_to_nrtime(self, secs):
+		# Transform Seconds into Hours and Minutes
+		return str(secs//3600)+":"+str(((secs//60)%60))
+        
+    def Icon(self):# Get Icon
+        print "DEBUG: getting Icons @%s" % (str(datetime.datetime.now()))
+        PathDir = os.getcwd() + "/icons/indicator-prayer-times.svg"
+        PathShare = "/usr/share/icons/hicolor/scalable/apps/indicator-prayer-times.svg"
+        
+        if os.path.exists(PathDir):
+            print "DEBUG: icon found in the OS @%s" % (str(datetime.datetime.now()))
+            return PathDir
+            
+        elif os.path.exists(PathShare):
+            print "DEBUG: icon found in the shared path @%s" % (str(datetime.datetime.now()))
+            return PathShare
+            
+        else:
+            sys.stderr.write('ERROR: Cannot find icon : indicator-prayer-times.svg @%s') % (str(datetime.datetime.now()))
+            print "DEBUG: indicator-prayer-times QUITING @%s" % (str(datetime.datetime.now()))
+            sys.exit(1)
+            
+    def Times(self):# Fills Menu With Prayer Times
+		PT = Prayertime(self.GetSettings(2),self.GetSettings(1), self.GetSettings(3), datetime.datetime.now().year, datetime.datetime.now().month, datetime.datetime.now().day, self.GetSettings(4), self.GetSettings(5), Season.Winter)
+		PT.calculate()
+		self.Menu.append(Gtk.MenuItem("Prayer Times for %s" % self.GetSettings(0), sensitive=False))
+		
+		# Qibla work 
+		QiblaDirection=PT.get_qibla()
+		if QiblaDirection < 0 : QiblaDirection += 360
+		QiblaItem = Gtk.MenuItem("Qibla is %.2f° from True North" % QiblaDirection)
+                QiblaItem.connect("activate", self.ShowQiblaWin, QiblaDirection)
+		self.Menu.append(QiblaItem)
+        #QiblaItem.connect('activate',ShowQiblaWin, None)
+		self.Menu.append(Gtk.SeparatorMenuItem())
+		self.Menu.append(Gtk.MenuItem("Fajr\t\t\t\t\t%s" % self.get_times(PT.fajr_time()), sensitive=False))
+		self.Menu.append(Gtk.MenuItem("Dhuhr\t\t\t\t%s" % self.get_times(PT.zuhr_time()), sensitive=False))
+		self.Menu.append(Gtk.MenuItem("Asr\t\t\t\t\t%s" % self.get_times(PT.asr_time()), sensitive=False))
+		self.Menu.append(Gtk.MenuItem("Maghrib\t\t\t\t%s" % self.get_times(PT.maghrib_time()), sensitive=False))
+		self.Menu.append(Gtk.MenuItem("Isha\t\t\t\t\t%s" % self.get_times(PT.isha_time()),sensitive=False))
+                print "DEBUG: DONE! @%s" % (str(datetime.datetime.now()))
+    def ShowQiblaWin(self, widget, Qibla):
+        #Qibla Window
+        self.QiblaWin=Gtk.Window(title="Qibla directions for %s" % self.GetSettings(0))
+        self.QiblaWin.set_border_width(10)
+        self.okbutton = Gtk.Button.new_from_stock(Gtk.STOCK_OK)
+        self.okbutton.connect('clicked', self.QiblaWinDestroy)
+        print "DEBUG: Showing Qibla window"
+        img='''<?xml version="1.0"?>
+<svg width="400" height="400" xmlns="http://www.w3.org/2000/svg">
+ <!-- center of rotation -->
+
+ <!-- rotated arrow -->
+ <g>
+  <title>Layer 1</title>
+  <circle id="svg_1" fill=" black" r="15" cy="200" cx="200"/>
+  <circle fill="#3f7f00" id="svg_2" stroke="#7fff00" stroke-width="10" r="195" cy="200" cx="200"/>
+  <g transform="rotate(%s, 200, 200)" stroke=" black" id="arrow">
+   <line stroke="#d4ffaa" fill="#d4ffaa" id="svg_3" stroke-width="10" y2="200" x2="20" y1="200" x1="200"/>
+   <line stroke="#d4ffaa" fill="#d4ffaa" id="svg_4" stroke-width="10" y2="200" x2="380" y1="200" x1="200"/>
+   <polygon stroke="#d4ffaa" fill="#d4ffaa" id="svg_5" stroke-width="18" points="380  200, 375  195, 375  205"/>
+  </g>
+  <circle opacity="0.14" id="svg_7" r="140.734375" cy="160.266592" cx="200.999992" stroke-width="10" stroke="#ffffff" fill="#ffffff"/>
+  <text stroke="#000000" fill="#ffffff" id="svg_6" font-weight="bold" font-size="29" y="306" x="178">%.2f&#176;</text>
+  <circle id="svg_8" r="85.702975" cy="859.766663" cx="863" opacity="0.25" stroke-width="10" stroke="#ffffff" fill="#ffffff"/>
+  <circle id="svg_9" r="53.601563" cy="71.266914" cx="199.5" opacity="0.13" stroke-width="10" stroke="#ffffff" fill="#ffffff"/>
+  <text font-weight="bold" xml:space="preserve" text-anchor="middle" font-family="N" font-size="63" id="svg_13" y="65" x="202" opacity="0.29" stroke="#000000" fill="#ffffff">N</text>
+  <text font-weight="bold" xml:space="preserve" text-anchor="middle" font-family="E" font-size="63" id="svg_14" y="224" x="358" opacity="0.29" stroke="#000000" fill="#ffffff">E</text>
+  <text font-weight="bold" xml:space="preserve" text-anchor="middle" font-family="W" font-size="63" id="svg_21" y="226" x="48" opacity="0.29" stroke="#000000" fill="#ffffff">W</text>
+  <text transform="matrix(2.5814, 0, 0, 2.35135, -590.651, -1175.68)" xml:space="preserve" text-anchor="middle" font-family="W" font-size="63" id="svg_23" y="758.885056" x="342.702705" opacity="0.29" stroke="#000000" fill="#ffffff"/>
+  <text xml:space="preserve" text-anchor="middle" font-family="W" font-size="63" id="svg_25" y="918" x="606" opacity="0.29" stroke="#000000" fill="#ffffff">s</text>
+  <text xml:space="preserve" text-anchor="middle" font-family="N" font-size="63" id="svg_31" y="1032" x="499" opacity="0.29" stroke="#7fff00" fill="#ffffff">w</text>
+  <text font-weight="bold" xml:space="preserve" text-anchor="middle" font-family="N" font-size="63" id="svg_33" y="384" x="197" opacity="0.29" stroke="#000000" fill="#ffffff">S</text>
+  <circle id="svg_34" r="9.238281" cy="199.49999" cx="200" stroke-width="10" stroke="#d4ffaa" fill="#000000"/>
+ </g>
+</svg>''' % (Qibla-90, Qibla)
+        stream = Gio.MemoryInputStream.new_from_bytes(GLib.Bytes.new(img))
+        pixbuf = GdkPixbuf.Pixbuf.new_from_stream(stream, None)
+        svgwidget = Gtk.Image.new_from_pixbuf(pixbuf)
+        box=Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        buttons = Gtk.Box()
+        spacer = Gtk.Box()
+        buttons.pack_start(spacer, True, True, 5)
+        buttons.pack_start(self.okbutton, False, True, 5)
+        box.pack_start(svgwidget, True, True, 5)
+        box.pack_start(buttons, False, False, 5)
+        self.QiblaWin.add(box)
+        self.QiblaWin.show_all()
+    def QiblaWinDestroy(self, widget, *args):
+        self.QiblaWin.hide()
+    def get_times(self, prayer):# If User Sets Clock Format 12hr or 24hr Return It As He Likes!
+        if self.GetSettings(6)=='12h':
+                print "DEBUG: using 12h format @%s" % (str(datetime.datetime.now()))
+	        return self.timeto12(prayer)
+	if self.GetSettings(6)=='24h':
+                print "DEBUG: using 24h format @%s" % (str(datetime.datetime.now()))
+		return self.timeto24(prayer)
+    def timeto24(self, timeto24):# Transform 12hr clock into 24hr Clock
+            print "DEBUG: transforming 24h to 12h @%s" % (str(datetime.datetime.now()))
+            tts=datetime.datetime.strptime(timeto24, "%I:%M:%S %p")
+            tfs=datetime.datetime.strftime(tts,"%H:%M")
+            return str(tfs)
+    def timeto12(self, timeto12):# Transform 12hr clock into 12hr Clock Without second and Remove The Zero before hour
+            print "DEBUG: analysing times @%s" % (str(datetime.datetime.now()))
+            tts=datetime.datetime.strptime(timeto12, "%I:%M:%S %p")
+            tfs=datetime.datetime.strftime(tts,"%l:%M %p")
+            return str(tfs)
+    def GetSettings(self,data):# Gets Settings From The Configuration File
+        cparse = ConfigParser.ConfigParser()
+        cparse.read([os.path.expanduser('~/.indicator-prayer-times')])
+        try:
+            city     = cparse.get('DEFAULT', 'city')
+            calcmthd = cparse.get('DEFAULT', 'calculation-method')
+            mazhab   = cparse.get('DEFAULT', 'mazhab')
+            hourfmt  = cparse.get('DEFAULT', 'clock-format')
+            city_lat = float(cparse.get('DEFAULT','latitude'))
+            city_lon = float(cparse.get('DEFAULT','longitude'))
+            city_tz  = float(cparse.get('DEFAULT','timezone'))
+            notif    = float(cparse.get('DEFAULT','notif'))
+            iconlabel= cparse.get('DEFAULT','iconlabel')
+            if calcmthd == 'UmmAlQuraUniv':
+                calcmthd=Calendar.UmmAlQuraUniv
+            if calcmthd == 'EgyptianGeneralAuthorityOfSurvey':
+                calcmthd=Calendar.EgyptianGeneralAuthorityOfSurvey
+            if calcmthd == 'UnivOfIslamicSciencesKarachi':
+                calcmthd=Calendar.UnivOfIslamicSciencesKarachi
+            if calcmthd == 'IslamicSocietyOfNorthAmerica':
+                calcmthd=Calendar.IslamicSocietyOfNorthAmerica
+            if calcmthd == 'MuslimWorldLeague':
+                 calcmthd=Calendar.MuslimWorldLeague
+    
+            if mazhab == 'Default':
+                 mazhab=Mazhab.Default
+            if mazhab == 'Hanafi':
+                 mazhab=Mazhab.Hanafi
+            s=[city,city_lat,city_lon,city_tz,calcmthd,mazhab,hourfmt,notif,iconlabel]
+            return s[data]
+        except ConfigParser.NoOptionError:
+                        print "DEBUG: no settings file found! using default settings @%s" % (str(datetime.datetime.now()))
+			self.SaveConfig('Makkah', 21.25, 39.49, 3, 'UmmAlQuraUniv', 'Default', '24h','10',1)
+			s=['Makkah', 21.25, 39.49, 3, 'UmmAlQuraUniv', 'Default', '24h','10','1']
+			return s[data]
+        except ValueError:
+                        os.system("rm ~/.indicator-prayer-times")
+                        print "DEBUG: Problem while reading settings file! using default settings @%s" % (str(datetime.datetime.now()))
+			self.SaveConfig('Makkah', 21.25, 39.49, 3, 'UmmAlQuraUniv', 'Default', '24h','10','1')
+			s=['Makkah', 21.25, 39.49, 3, 'UmmAlQuraUniv', 'Default', '24h','10','1']
+			return s[data]
+        
+    def SaveConfig(self,city_name,lat,lon,tz,calcmthd,mazhab,clockfmt,notif,iconlabel):# Save Configuration File
+                print "DEBUG: saving settings @%s" % (str(datetime.datetime.now()))
+		config = open(os.path.expanduser('~/.indicator-prayer-times'), 'w')
+		Text='''# Indicator-Prayer-Times Settings File
+# PLEASE RESTART THE APPLICATION TO APPLY THE CHANGES
+
+[DEFAULT]
+city = %s
+
+# Possible Values for Calculation Methods
+# UmmAlQuraUniv
+# EgyptianGeneralAuthorityOfSurvey
+# UnivOfIslamicSciencesKarachi
+# IslamicSocietyOfNorthAmerica
+# MuslimWorldLeague
+calculation-method = %s
+
+# Possible Values for Mazahab
+# Default
+# Hanafi
+mazhab = %s
+
+# Possible Values for Clock Format
+# 24h
+# 12h
+clock-format = %s
+
+
+latitude = %s
+longitude = %s
+timezone = %s
+notif = %s
+iconlabel = %s''' % (city_name,calcmthd,mazhab,clockfmt,lat,lon,tz,notif,iconlabel)
+                config.write(Text)
+                config.close()
+                
+    def ShowSettings(self, widget, data):
+                print "DEBUG: opening settings dialog @%s" % (str(datetime.datetime.now()))
+		self.configer.show_all()
+		self.configer.SetLayout()
+		
+    def Hijri(self):# Fill Menu With Hijri Date
+		wd=datetime.datetime.now().strftime("%A")
+		
+		calc = HijriCal()
+		
+		h_months = ['Muharram ',  'Safar', 'Rabi al Awwal',  'Rabi al Akhira',  'Jumada al Ula', 'Jumada al Akhira', 'Rajab',  "Sha'ban",  'Ramadan',  'Shawwal',  "Dhu al Qa'da", 'Dhu al Hijja']
+		
+		h_year,  h_month,  h_day,  h_week_day = calc.today
+		
+		h_date = '%i %s %i' % ( h_day,  h_months[h_month-1],  h_year)
+		
+		self.Menu.append(Gtk.MenuItem(wd+" "+h_date))
+                print "DEBUG: DONE! @%s" % (str(datetime.datetime.now()))
+    def AboutDialog(self,widget,data=None):# The About Dialog
+        print "DEBUG: opening about dialog @%s" % (str(datetime.datetime.now()))
+        AboutDialog = Gtk.AboutDialog()
+        
+        AboutDialog.set_program_name("Indicator Prayer Times")
+        AboutDialog.set_website("https://launchpad.net/indicator-prayer-times")
+        AboutDialog.set_website_label("Launchpad project page")
+        AboutDialog.set_authors(["Mohamed Alaa <m.alaa8@gmail.com> (Main Developer)","Eslam Mostafa <CsEslam@gmail.com> (Developer)","Ahmed Youssef <xmonader(at)gmail.com> (PyPrayerTimes Module)"])
+        AboutDialog.set_license('''Indicator Prayer Times, A Prayer Times displayer for Indicator Applet.
+Copyright © 2011-2013 Mohamed Alaa
+Copyright © 2013 Indicator-prayer-times Developers
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.''')
+        AboutDialog.set_version("0.31")
+        AboutDialog.set_comments("A Prayer Times displayer for Indicator Applet.")
+        AboutDialog.set_copyright("Copyright © 2011-2013 Mohamed Alaa\nCopyright © 2012-2013 Indicator-prayer-times Developers")
+        AboutDialog.run()
+        AboutDialog.destroy()
+        
+    def main(self):
+        Gtk.main()
+        print "DEBUG: starting/stopping GTK @%s" % (str(datetime.datetime.now()))
+
+if __name__ == '__main__':
+	ipm = IndicatorPrayerTimes()
+	ipm.main()

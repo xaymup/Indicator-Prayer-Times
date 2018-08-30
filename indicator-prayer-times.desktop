@@ -1,0 +1,9 @@
+
+[Desktop Entry]
+Name=Indicator Prayer Times
+Exec=indicator-prayer-times
+Icon=indicator-prayer-times.svg
+Terminal=false
+Type=Application
+Categories=GTK;Utility;
+Name[en_US]=Indicator Prayer Times
